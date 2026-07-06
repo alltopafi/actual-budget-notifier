@@ -89,6 +89,7 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
         id: tx.id,
         date: tx.date,
         amount: tx.amount,
+        category: tx.category,
         'payee.name': tx.payee ? payeeMap.get(tx.payee) : null,
         'category.name': tx.category ? categoryMap.get(tx.category) : null,
         'account.name': tx.account ? accountMap.get(tx.account) : null,
@@ -101,6 +102,7 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
       if (tx.is_parent && Array.isArray(tx.subtransactions)) {
         record.subtransactions = tx.subtransactions.map((sub: any) => ({
           amount: sub.amount,
+          category: sub.category,
           'category.name': sub.category ? categoryMap.get(sub.category) : null,
           notes: sub.notes
         }));
@@ -111,6 +113,91 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
 
     if (newTransactions.length > 0) {
       console.log(`Detected ${newTransactions.length} new transaction(s).`);
+
+      // 1. Gather all unique months to fetch budgets for
+      const monthsSet = new Set<string>();
+      for (const tx of newTransactions) {
+        if (tx.date) {
+          monthsSet.add(tx.date.substring(0, 7));
+        }
+      }
+
+      // 2. Fetch budget details for each represented month
+      const monthBudgets = new Map<string, any>();
+      for (const month of monthsSet) {
+        console.log(`Fetching budget details for month: ${month}`);
+        try {
+          const budget = await api.getBudgetMonth(month);
+          monthBudgets.set(month, budget);
+        } catch (err) {
+          console.error(`Failed to fetch budget for month ${month}:`, err);
+        }
+      }
+
+      // Helper to retrieve category from loaded budgets
+      const getCategoryFromBudget = (month: string, categoryId: string) => {
+        const budget = monthBudgets.get(month);
+        if (!budget || !budget.categoryGroups) return null;
+        for (const group of budget.categoryGroups) {
+          if (group.categories) {
+            const cat = group.categories.find((c: any) => c.id === categoryId);
+            if (cat) return cat;
+          }
+        }
+        return null;
+      };
+
+      // Helper to format amount
+      const formatAmountLocal = (amount: number) => {
+        const dollarVal = Math.abs(amount / 100).toFixed(2);
+        const sign = amount < 0 ? '-' : amount > 0 ? '+' : '';
+        return `${sign}$${dollarVal}`;
+      };
+
+      // 3. Populate budget details for each transaction
+      for (const tx of newTransactions) {
+        const txMonth = tx.date.substring(0, 7);
+
+        if (!tx.is_parent) {
+          // Regular transaction
+          if (tx.category) {
+            const catBudget = getCategoryFromBudget(txMonth, tx.category);
+            if (catBudget && !catBudget.is_income) {
+              const budgetedVal = catBudget.budgeted || 0;
+              const spentVal = catBudget.spent || 0;
+              const balanceVal = catBudget.balance || 0;
+
+              const budgetedStr = formatAmountLocal(budgetedVal);
+              const spentStr = formatAmountLocal(spentVal);
+
+              if (balanceVal < 0) {
+                const overspentStr = formatAmountLocal(Math.abs(balanceVal));
+                tx.categoryBudgetInfo = `⚠️ Over budget by **${overspentStr}** (Budgeted: ${budgetedStr}, Spent: ${spentStr})`;
+              } else {
+                const balanceStr = formatAmountLocal(balanceVal);
+                tx.categoryBudgetInfo = `✅ Within budget with **${balanceStr}** remaining (Budgeted: ${budgetedStr}, Spent: ${spentStr})`;
+              }
+            }
+          }
+        } else if (tx.is_parent && Array.isArray(tx.subtransactions)) {
+          // Split transaction
+          for (const sub of tx.subtransactions) {
+            if (sub.category) {
+              const catBudget = getCategoryFromBudget(txMonth, sub.category);
+              if (catBudget && !catBudget.is_income) {
+                const balanceVal = catBudget.balance || 0;
+                if (balanceVal < 0) {
+                  const overspentStr = formatAmountLocal(Math.abs(balanceVal));
+                  sub.categoryBudgetInfo = `⚠️ Over by ${overspentStr}`;
+                } else {
+                  const balanceStr = formatAmountLocal(balanceVal);
+                  sub.categoryBudgetInfo = `${balanceStr} left`;
+                }
+              }
+            }
+          }
+        }
+      }
       
       // Sort chronologically (oldest first) so they display in order in Discord
       newTransactions.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());

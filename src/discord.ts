@@ -2,6 +2,7 @@ export interface TransactionRecord {
   id: string;
   date: string;
   amount: number;
+  category?: string | null;
   'payee.name'?: string | null;
   'category.name'?: string | null;
   'account.name'?: string | null;
@@ -10,9 +11,12 @@ export interface TransactionRecord {
   is_parent?: boolean;
   subtransactions?: Array<{
     amount: number;
+    category?: string | null;
     'category.name'?: string | null;
     notes?: string | null;
+    categoryBudgetInfo?: string | null;
   }>;
+  categoryBudgetInfo?: string | null;
 }
 
 /**
@@ -61,14 +65,19 @@ function buildEmbedForTransaction(tx: TransactionRecord): any {
     fields.push({ name: 'Notes', value: tx.notes, inline: false });
   }
 
+  if (tx.categoryBudgetInfo) {
+    fields.push({ name: 'Budget Status', value: tx.categoryBudgetInfo, inline: false });
+  }
+
   let description = '';
   // If this is a split transaction, list the details
   if (tx.is_parent && tx.subtransactions && tx.subtransactions.length > 0) {
     description = '**Splits:**\n' + tx.subtransactions.map(sub => {
       const subCategory = sub['category.name'] || 'Uncategorized';
       const subAmountStr = formatAmount(sub.amount);
+      const budgetStr = sub.categoryBudgetInfo ? ` — *(${sub.categoryBudgetInfo})*` : '';
       const noteStr = sub.notes ? ` *(${sub.notes})*` : '';
-      return `• **${subAmountStr}** ➔ ${subCategory}${noteStr}`;
+      return `• **${subAmountStr}** ➔ ${subCategory}${budgetStr}${noteStr}`;
     }).join('\n');
   }
 
