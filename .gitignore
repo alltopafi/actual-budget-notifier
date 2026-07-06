@@ -1,0 +1,11 @@
+# Dependency directories
+node_modules/
+
+# Build directory
+dist/
+
+# Local configuration
+.env
+
+# Local state and Actual Budget cache
+data/
