@@ -1,14 +1,17 @@
 # ==========================================
-# Stage 1: Build stage
+# Stage 1: Build stage (installs compilation tools)
 # ==========================================
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# Install build dependencies required for compiling native C++ modules (like better-sqlite3)
+RUN apk add --no-cache python3 make g++
+
 # Copy package definition and config files
 COPY package*.json tsconfig.json ./
 
-# Install all dependencies (including devDependencies for compilation)
+# Install all dependencies (which compiles better-sqlite3 successfully)
 RUN npm ci
 
 # Copy source files
@@ -16,6 +19,9 @@ COPY src/ ./src/
 
 # Compile TypeScript to JavaScript
 RUN npm run build
+
+# Prune devDependencies to leave only production packages in node_modules
+RUN npm prune --omit=dev
 
 # ==========================================
 # Stage 2: Runtime stage
@@ -27,13 +33,9 @@ WORKDIR /app
 # Set production environment
 ENV NODE_ENV=production
 
-# Copy package definition
+# Copy package definition, compiled files, and pruned node_modules from builder
 COPY package*.json ./
-
-# Install ONLY production dependencies to keep the image small
-RUN npm ci --only=production
-
-# Copy compiled files from the builder stage
+COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
 # Create a directory for local state and Actual Budget cache,
