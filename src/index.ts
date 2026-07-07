@@ -3,6 +3,19 @@ import * as path from 'path';
 import { loadState } from './state';
 import { checkNewTransactions, NotifierConfig } from './notifier';
 
+// Override console methods to automatically prefix logs with an ISO timestamp
+const originalLog = console.log;
+const originalError = console.error;
+const originalWarn = console.warn;
+const originalInfo = console.info;
+
+const getTimestamp = () => `[${new Date().toISOString()}]`;
+
+console.log = (...args) => originalLog(getTimestamp(), ...args);
+console.error = (...args) => originalError(getTimestamp(), ...args);
+console.warn = (...args) => originalWarn(getTimestamp(), ...args);
+console.info = (...args) => originalInfo(getTimestamp(), ...args);
+
 // Load environment variables from .env file
 dotenv.config();
 
@@ -80,7 +93,7 @@ async function main() {
   // Recursive timeout loop to check for transactions.
   // This avoids parallel executions if a sync takes longer than the interval.
   const runLoop = async () => {
-    console.log(`\n--- Starting Scan at ${new Date().toISOString()} ---`);
+    console.log('\n--- Starting Scan ---');
     try {
       await checkNewTransactions(config, state);
     } catch (error) {
