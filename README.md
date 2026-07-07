@@ -46,6 +46,25 @@ When deploying this service in a Kubernetes cluster, note the following guidelin
 
 ---
 
+## HTTP Trigger Hook
+
+To allow instant notifications when new transactions are added from other scripts or input forms (such as your `actual-budget-input` project), the service runs a lightweight HTTP server on port `3000` (configurable via the `PORT` environment variable).
+
+Exposed Endpoint:
+- **Method**: `POST`
+- **Path**: `/scan`
+
+You can trigger a scan immediately by making a `POST` request to the service:
+
+```bash
+curl -X POST http://localhost:3000/scan
+```
+
+### Safety & Concurrency
+To prevent database lock conflicts on Actual Budget's SQLite cache, the service implements an internal concurrency lock. If a scan is already running (e.g., triggered by the scheduled interval or a previous HTTP request), concurrent triggers will be safely skipped.
+
+---
+
 ## Development & Local Testing
 
 ### Prerequisites

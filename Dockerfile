@@ -45,6 +45,9 @@ RUN mkdir -p /app/data && chown -R node:node /app
 # Switch to the non-root user
 USER node
 
+# Expose default HTTP hook port
+EXPOSE 3000
+
 # Expose local volume directory
 VOLUME ["/app/data"]
 

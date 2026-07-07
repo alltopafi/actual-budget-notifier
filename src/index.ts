@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import * as http from 'http';
 import { loadState } from './state';
 import { checkNewTransactions, NotifierConfig } from './notifier';
 
@@ -18,6 +19,32 @@ console.info = (...args) => originalInfo(getTimestamp(), ...args);
 
 // Load environment variables from .env file
 dotenv.config();
+
+/**
+ * Starts a lightweight HTTP server to listen for push hook triggers.
+ */
+function startHttpServer(port: number, triggerScan: () => Promise<void>) {
+  const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/scan') {
+      console.log('Received HTTP trigger on POST /scan. Launching database check...');
+      
+      // Run the scan asynchronously so we can return a response immediately
+      triggerScan().catch(err => {
+        console.error('HTTP-triggered scan failed:', err);
+      });
+
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'Scan triggered' }));
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not Found. Exposes POST /scan' }));
+    }
+  });
+
+  server.listen(port, () => {
+    console.log(`HTTP hook listener running on port ${port}. Exposes POST /scan`);
+  });
+}
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -90,16 +117,39 @@ async function main() {
   const state = loadState(config.stateFilePath);
   console.log(`State loaded. Currently tracking ${Object.keys(state.notifiedTransactions).length} transaction(s).`);
 
-  // Recursive timeout loop to check for transactions.
-  // This avoids parallel executions if a sync takes longer than the interval.
-  const runLoop = async () => {
-    console.log('\n--- Starting Scan ---');
+  // Validate port configuration
+  const portStr = getOptionalEnv('PORT', '3000');
+  const port = parseInt(portStr, 10);
+  if (isNaN(port) || port <= 0) {
+    console.error(`Invalid PORT: ${portStr}. Must be a positive integer.`);
+    process.exit(1);
+  }
+
+  // Scanner lock to prevent concurrent database opens (which locks sqlite)
+  let isScanning = false;
+  const triggerScan = async () => {
+    if (isScanning) {
+      console.log('Scan already in progress. Skipping concurrent trigger.');
+      return;
+    }
+    isScanning = true;
     try {
       await checkNewTransactions(config, state);
     } catch (error) {
-      console.error('Unhandled error during scan execution:', error);
+      console.error('Scan execution failed:', error);
+    } finally {
+      isScanning = false;
     }
-    console.log(`--- Scan Completed. Waiting ${scanIntervalMinutes} minute(s) ---`);
+  };
+
+  // Start the HTTP hook server
+  startHttpServer(port, triggerScan);
+
+  // Recursive timeout loop to check for transactions as a backup.
+  const runLoop = async () => {
+    console.log('\n--- Starting Scheduled Scan ---');
+    await triggerScan();
+    console.log(`--- Scheduled Scan Completed. Waiting ${scanIntervalMinutes} minute(s) ---`);
     setTimeout(runLoop, scanIntervalMinutes * 60 * 1000);
   };
 
