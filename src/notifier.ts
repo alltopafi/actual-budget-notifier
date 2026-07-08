@@ -315,15 +315,33 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
         }
 
         if (catLines.length > 0) {
-          let fieldValue = catLines.join('\n');
-          if (fieldValue.length > 1024) {
-            fieldValue = fieldValue.substring(0, 1000) + '\n... (truncated)';
+          let currentFieldText = '';
+          let partIndex = 1;
+
+          for (const line of catLines) {
+            // Discord fields have a 1024 character limit.
+            // If adding the next line would exceed our 1000 character safety buffer,
+            // push the accumulated lines and start a new field.
+            if (currentFieldText.length + line.length + 1 > 1000) {
+              groupFields.push({
+                name: partIndex === 1 ? `📁 ${group.name}` : `📁 ${group.name} (Continued)`,
+                value: currentFieldText.trim(),
+                inline: false
+              });
+              currentFieldText = '';
+              partIndex++;
+            }
+            currentFieldText += line + '\n';
           }
-          groupFields.push({
-            name: `📁 ${group.name}`,
-            value: fieldValue,
-            inline: false
-          });
+
+          // Push the final chunk of lines
+          if (currentFieldText.trim().length > 0) {
+            groupFields.push({
+              name: partIndex === 1 ? `📁 ${group.name}` : `📁 ${group.name} (Continued)`,
+              value: currentFieldText.trim(),
+              inline: false
+            });
+          }
         }
       }
     }
