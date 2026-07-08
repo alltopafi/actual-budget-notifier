@@ -11,7 +11,7 @@ const originalError = console.error;
 const originalWarn = console.warn;
 const originalInfo = console.info;
 
-const getTimestamp = () => `[${new Date().toISOString()}]`;
+const getTimestamp = () => `[${new Date().toLocaleString('sv')}]`;
 
 console.log = (...args) => originalLog(getTimestamp(), ...args);
 console.error = (...args) => originalError(getTimestamp(), ...args);
