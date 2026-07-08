@@ -310,7 +310,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
               statusEmoji = '⚪';
             }
 
-            catLines.push(`${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
+            catLines.push(`\u2003\u2003${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
           }
         }
 

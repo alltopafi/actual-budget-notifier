@@ -24,7 +24,7 @@ dotenv.config();
 /**
  * Starts a lightweight HTTP server to listen for push hook triggers.
  */
-function startHttpServer(port: number, triggerScan: () => Promise<void>) {
+function startHttpServer(port: number, triggerScan: () => Promise<void>, triggerReport: () => Promise<void>) {
   const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/scan') {
       console.log('Received HTTP trigger on POST /scan. Launching database check...');
@@ -36,14 +36,24 @@ function startHttpServer(port: number, triggerScan: () => Promise<void>) {
 
       res.writeHead(202, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'Scan triggered' }));
+    } else if (req.method === 'POST' && req.url === '/report') {
+      console.log('Received HTTP trigger on POST /report. Launching daily report generator...');
+      
+      // Run the report asynchronously so we can return a response immediately
+      triggerReport().catch(err => {
+        console.error('HTTP-triggered daily report failed:', err);
+      });
+
+      res.writeHead(202, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'Daily report triggered' }));
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Not Found. Exposes POST /scan' }));
+      res.end(JSON.stringify({ error: 'Not Found. Exposes POST /scan and POST /report' }));
     }
   });
 
   server.listen(port, () => {
-    console.log(`HTTP hook listener running on port ${port}. Exposes POST /scan`);
+    console.log(`HTTP hook listener running on port ${port}. Exposes POST /scan and POST /report`);
   });
 }
 
@@ -146,8 +156,17 @@ async function main() {
     }
   };
 
+  // Wrapper for manual report triggers to prevent concurrency lock issues
+  const triggerReport = async () => {
+    if (isScanning) {
+      console.log('Scan or report already in progress. Skipping manual report trigger.');
+      return;
+    }
+    await runDailyReportSafe();
+  };
+
   // Start the HTTP hook server
-  startHttpServer(port, triggerScan);
+  startHttpServer(port, triggerScan, triggerReport);
 
   // Helper to run daily report with locking
   const runDailyReportSafe = async () => {

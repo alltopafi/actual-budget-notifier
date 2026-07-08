@@ -50,14 +50,18 @@ When deploying this service in a Kubernetes cluster, note the following guidelin
 
 To allow instant notifications when new transactions are added from other scripts or input forms (such as your `actual-budget-input` project), the service runs a lightweight HTTP server on port `3000` (configurable via the `PORT` environment variable).
 
-Exposed Endpoint:
-- **Method**: `POST`
-- **Path**: `/scan`
+Exposed Endpoints:
+- **`POST /scan`**: Triggers an immediate check for new transactions.
+- **`POST /report`**: Triggers an immediate generation and dispatch of the Daily Budget Report (useful for manual testing).
 
-You can trigger a scan immediately by making a `POST` request to the service:
+You can trigger these endpoints by making `POST` requests to the service:
 
 ```bash
+# Trigger transaction scan
 curl -X POST http://localhost:3000/scan
+
+# Trigger daily budget report (for manual testing)
+curl -X POST http://localhost:3000/report
 ```
 
 ### Safety & Concurrency
