@@ -133,10 +133,10 @@ export async function sendDiscordNotification(webhookUrl: string, transactions: 
 }
 
 /**
- * Sends a single custom embed daily report directly to the Discord webhook.
+ * Sends a custom embed daily report (or array of embeds) directly to the Discord webhook.
  */
-export async function sendDiscordReport(webhookUrl: string, embed: any): Promise<void> {
-  const payload = { embeds: [embed] };
+export async function sendDiscordReport(webhookUrl: string, embeds: any | any[]): Promise<void> {
+  const payload = { embeds: Array.isArray(embeds) ? embeds : [embeds] };
 
   try {
     const response = await fetch(webhookUrl, {

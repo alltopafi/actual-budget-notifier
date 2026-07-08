@@ -272,23 +272,43 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     console.log(`Daily Report: Fetching budget status for ${currentMonth}...`);
     const budget = await api.getBudgetMonth(currentMonth);
 
-    // Helper to format amount
-    const formatAmountLocal = (amount: number) => {
+    // Helper to format amount (no "+" sign on positive numbers, only "-" for negative)
+    const formatAmountReport = (amount: number) => {
       const dollarVal = Math.abs(amount / 100).toFixed(2);
-      const sign = amount < 0 ? '-' : amount > 0 ? '+' : '';
+      const sign = amount < 0 ? '-' : '';
       return `${sign}$${dollarVal}`;
     };
 
-    const groupFields: any[] = [];
-    
-    // 2. Loop through category groups and categories to build report fields
+    const budgetedTotal = budget.totalBudgeted || 0;
+    const spentTotal = budget.totalSpent || 0;
+    const balanceTotal = budget.totalBalance || 0;
+
+    const totalBudgetedStr = formatAmountReport(budgetedTotal);
+    const totalSpentStr = formatAmountReport(spentTotal);
+    const totalBalanceStr = formatAmountReport(balanceTotal);
+    const totalStatusIndicator = balanceTotal < 0 ? '🔴 Over budget' : '🟢 Within budget';
+
+    const [year, month] = currentMonth.split('-');
+    const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+    const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const title = `📊 Daily Budget Report — ${monthName}`;
+    const color = balanceTotal < 0 ? 15143740 : 3066993;
+
+    const embeds: any[] = [];
+    let currentDescription = '';
+
+    // 2. Loop through category groups and categories to build report description
     if (budget.categoryGroups) {
       for (const group of budget.categoryGroups) {
         if (group.is_income || group.hidden) {
           continue;
         }
 
+        let groupBudgeted = 0;
+        let groupSpent = 0;
         const catLines: string[] = [];
+
         if (Array.isArray(group.categories)) {
           for (const cat of group.categories as any[]) {
             if (cat.hidden || cat.is_income) {
@@ -299,9 +319,12 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
             const spentVal = cat.spent || 0;
             const balanceVal = cat.balance || 0;
 
-            const budgetedStr = formatAmountLocal(budgetedVal);
-            const spentStr = formatAmountLocal(spentVal);
-            const balanceStr = formatAmountLocal(balanceVal);
+            groupBudgeted += budgetedVal;
+            groupSpent += spentVal;
+
+            const budgetedStr = formatAmountReport(budgetedVal);
+            const spentStr = formatAmountReport(spentVal);
+            const balanceStr = formatAmountReport(balanceVal);
 
             let statusEmoji = '🟢';
             if (balanceVal < 0) {
@@ -310,75 +333,68 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
               statusEmoji = '⚪';
             }
 
+            // Use Em Spaces for clean indentation
             catLines.push(`\u2003\u2003${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
           }
         }
 
         if (catLines.length > 0) {
-          let currentFieldText = '';
-          let partIndex = 1;
+          const groupSpentStr = formatAmountReport(groupSpent);
+          const groupBudgetedStr = formatAmountReport(groupBudgeted);
 
-          for (const line of catLines) {
-            // Discord fields have a 1024 character limit.
-            // If adding the next line would exceed our 1000 character safety buffer,
-            // push the accumulated lines and start a new field.
-            if (currentFieldText.length + line.length + 1 > 1000) {
-              groupFields.push({
-                name: partIndex === 1 ? `📁 ${group.name}` : `📁 ${group.name} (Continued)`,
-                value: currentFieldText.trim(),
-                inline: false
-              });
-              currentFieldText = '';
-              partIndex++;
-            }
-            currentFieldText += line + '\n';
-          }
+          // Header formatted as: "### 📁 Group Name — Spent -$X.XX / Budgeted $Y.YY"
+          let groupText = `### 📁 ${group.name} — Spent ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
+          groupText += catLines.join('\n') + '\n\n';
 
-          // Push the final chunk of lines
-          if (currentFieldText.trim().length > 0) {
-            groupFields.push({
-              name: partIndex === 1 ? `📁 ${group.name}` : `📁 ${group.name} (Continued)`,
-              value: currentFieldText.trim(),
-              inline: false
+          // Paginate into a new embed if it exceeds safe description limits (4096 is absolute max, we use 3800)
+          if (currentDescription.length + groupText.length > 3800) {
+            embeds.push({
+              title: embeds.length === 0 ? title : `${title} (Continued)`,
+              color,
+              description: currentDescription.trim()
             });
+            currentDescription = '';
           }
+          currentDescription += groupText;
         }
       }
     }
 
-    // 3. Overall monthly summary
-    const budgetedTotal = budget.totalBudgeted || 0;
-    const spentTotal = budget.totalSpent || 0;
-    const balanceTotal = budget.totalBalance || 0;
+    // 3. Overall monthly summary formatted
+    const summaryText = `### 📊 Overall Monthly Summary\n` +
+                        `\u2003\u2003• **Total Budgeted**: ${totalBudgetedStr}\n` +
+                        `\u2003\u2003• **Total Spent**: ${totalSpentStr}\n` +
+                        `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
 
-    const totalBudgetedStr = formatAmountLocal(budgetedTotal);
-    const totalSpentStr = formatAmountLocal(spentTotal);
-    const totalBalanceStr = formatAmountLocal(balanceTotal);
-    const totalStatusIndicator = balanceTotal < 0 ? '🔴 Over budget' : '🟢 Within budget';
+    if (currentDescription.length + summaryText.length > 3800) {
+      embeds.push({
+        title: embeds.length === 0 ? title : `${title} (Continued)`,
+        color,
+        description: currentDescription.trim()
+      });
+      embeds.push({
+        title: `${title} — Summary`,
+        color,
+        description: summaryText,
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: 'Actual Budget Notifier'
+        }
+      });
+    } else {
+      currentDescription += '\n' + summaryText;
+      embeds.push({
+        title: embeds.length === 0 ? title : `${title} (Continued)`,
+        color,
+        description: currentDescription.trim(),
+        timestamp: new Date().toISOString(),
+        footer: {
+          text: 'Actual Budget Notifier'
+        }
+      });
+    }
 
-    const summaryField = {
-      name: '📊 Overall Monthly Summary',
-      value: `• **Total Budgeted**: ${totalBudgetedStr}\n` +
-             `• **Total Spent**: ${totalSpentStr}\n` +
-             `• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`,
-      inline: false
-    };
-
-    const [year, month] = currentMonth.split('-');
-    const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
-    const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-    const embed = {
-      title: `📊 Daily Budget Report — ${monthName}`,
-      color: balanceTotal < 0 ? 15143740 : 3066993,
-      fields: [...groupFields, summaryField],
-      timestamp: new Date().toISOString(),
-      footer: {
-        text: 'Actual Budget Notifier'
-      }
-    };
-
-    await sendDiscordReport(config.discordWebhookUrl, embed);
+    await sendDiscordReport(config.discordWebhookUrl, embeds);
 
   } finally {
     console.log('Daily Report: Shutting down connection to Actual Server...');
