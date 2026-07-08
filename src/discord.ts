@@ -131,3 +131,29 @@ export async function sendDiscordNotification(webhookUrl: string, transactions: 
     }
   }
 }
+
+/**
+ * Sends a single custom embed daily report directly to the Discord webhook.
+ */
+export async function sendDiscordReport(webhookUrl: string, embed: any): Promise<void> {
+  const payload = { embeds: [embed] };
+
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Failed to send Discord daily report. Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
+    } else {
+      console.log('Successfully sent Daily Budget Report to Discord.');
+    }
+  } catch (error) {
+    console.error('Network error sending daily report to Discord:', error);
+  }
+}

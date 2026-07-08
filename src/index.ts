@@ -1,8 +1,9 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as http from 'http';
+import * as cron from 'node-cron';
 import { loadState } from './state';
-import { checkNewTransactions, NotifierConfig } from './notifier';
+import { checkNewTransactions, NotifierConfig, sendDailyReport } from './notifier';
 
 // Override console methods to automatically prefix logs with an ISO timestamp
 const originalLog = console.log;
@@ -98,7 +99,9 @@ async function main() {
     discordWebhookUrl,
     lookbackDays,
     stateFilePath: path.resolve(stateFilePath),
-    triggerBankSync
+    triggerBankSync,
+    dailyReportCron: getOptionalEnv('DAILY_REPORT_CRON', '0 20 * * *'),
+    dailyReportTz: getOptionalEnv('DAILY_REPORT_TZ', 'America/Chicago')
   };
 
   console.log('--- Configuration ---');
@@ -108,6 +111,7 @@ async function main() {
   console.log(`Lookback Days:      ${config.lookbackDays}`);
   console.log(`Interval:           ${scanIntervalMinutes} minute(s)`);
   console.log(`Trigger Bank Sync:  ${config.triggerBankSync}`);
+  console.log(`Daily Report Cron:  ${config.dailyReportCron} (${config.dailyReportTz})`);
   console.log(`Data Directory:     ${config.actualDataDir}`);
   console.log(`State File Path:    ${config.stateFilePath}`);
   console.log('---------------------');
@@ -144,6 +148,40 @@ async function main() {
 
   // Start the HTTP hook server
   startHttpServer(port, triggerScan);
+
+  // Helper to run daily report with locking
+  const runDailyReportSafe = async () => {
+    isScanning = true;
+    console.log('\n--- Starting Daily Budget Report Scan ---');
+    try {
+      await sendDailyReport(config);
+      console.log('--- Daily Budget Report Scan Completed ---');
+    } catch (err) {
+      console.error('Failed to run daily budget report:', err);
+    } finally {
+      isScanning = false;
+    }
+  };
+
+  // Schedule the daily budget report cron task
+  console.log(`Scheduling Daily Report: ${config.dailyReportCron} in timezone ${config.dailyReportTz}`);
+  cron.schedule(config.dailyReportCron, async () => {
+    if (isScanning) {
+      console.log('Daily Report: Scan already in progress. Delaying report run...');
+      setTimeout(async () => {
+        if (isScanning) {
+          console.log('Daily Report: Scan still in progress. Skipping today\'s report.');
+          return;
+        }
+        await runDailyReportSafe();
+      }, 30000);
+      return;
+    }
+    await runDailyReportSafe();
+  }, {
+    scheduled: true,
+    timezone: config.dailyReportTz
+  });
 
   // Recursive timeout loop to check for transactions as a backup.
   const runLoop = async () => {

@@ -1,6 +1,6 @@
 import * as api from '@actual-app/api';
 import { State, isNotified, addNotified, pruneOldTransactions, saveState } from './state';
-import { sendDiscordNotification, TransactionRecord } from './discord';
+import { sendDiscordNotification, TransactionRecord, sendDiscordReport } from './discord';
 
 export interface NotifierConfig {
   actualServerUrl: string;
@@ -12,6 +12,8 @@ export interface NotifierConfig {
   lookbackDays: number;
   stateFilePath: string;
   triggerBankSync: boolean;
+  dailyReportCron: string;
+  dailyReportTz: string;
 }
 
 /**
@@ -235,6 +237,133 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
 
   } finally {
     console.log('Shutting down connection to Actual Server...');
+    await api.shutdown();
+  }
+}
+
+/**
+ * Generates and sends a daily category budget report to Discord.
+ */
+export async function sendDailyReport(config: NotifierConfig): Promise<void> {
+  console.log('Daily Report: Initializing connection to Actual Server...');
+  await api.init({
+    dataDir: config.actualDataDir,
+    serverURL: config.actualServerUrl,
+    password: config.actualServerPassword
+  });
+
+  try {
+    console.log(`Daily Report: Loading budget ${config.actualBudgetSyncId}...`);
+    await api.downloadBudget(config.actualBudgetSyncId, {
+      password: config.actualEncryptionPassword
+    });
+
+    // 1. Get current month in the configured timezone (America/Chicago by default)
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: config.dailyReportTz,
+      year: 'numeric',
+      month: '2-digit'
+    });
+    const parts = formatter.formatToParts(new Date());
+    const yearPart = parts.find(p => p.type === 'year')?.value;
+    const monthPart = parts.find(p => p.type === 'month')?.value;
+    const currentMonth = `${yearPart}-${monthPart}`;
+
+    console.log(`Daily Report: Fetching budget status for ${currentMonth}...`);
+    const budget = await api.getBudgetMonth(currentMonth);
+
+    // Helper to format amount
+    const formatAmountLocal = (amount: number) => {
+      const dollarVal = Math.abs(amount / 100).toFixed(2);
+      const sign = amount < 0 ? '-' : amount > 0 ? '+' : '';
+      return `${sign}$${dollarVal}`;
+    };
+
+    const groupFields: any[] = [];
+    
+    // 2. Loop through category groups and categories to build report fields
+    if (budget.categoryGroups) {
+      for (const group of budget.categoryGroups) {
+        if (group.is_income || group.hidden) {
+          continue;
+        }
+
+        const catLines: string[] = [];
+        if (Array.isArray(group.categories)) {
+          for (const cat of group.categories as any[]) {
+            if (cat.hidden || cat.is_income) {
+              continue;
+            }
+
+            const budgetedVal = cat.budgeted || 0;
+            const spentVal = cat.spent || 0;
+            const balanceVal = cat.balance || 0;
+
+            const budgetedStr = formatAmountLocal(budgetedVal);
+            const spentStr = formatAmountLocal(spentVal);
+            const balanceStr = formatAmountLocal(balanceVal);
+
+            let statusEmoji = '🟢';
+            if (balanceVal < 0) {
+              statusEmoji = '🔴';
+            } else if (spentVal === 0 && budgetedVal === 0) {
+              statusEmoji = '⚪';
+            }
+
+            catLines.push(`${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
+          }
+        }
+
+        if (catLines.length > 0) {
+          let fieldValue = catLines.join('\n');
+          if (fieldValue.length > 1024) {
+            fieldValue = fieldValue.substring(0, 1000) + '\n... (truncated)';
+          }
+          groupFields.push({
+            name: `📁 ${group.name}`,
+            value: fieldValue,
+            inline: false
+          });
+        }
+      }
+    }
+
+    // 3. Overall monthly summary
+    const budgetedTotal = budget.totalBudgeted || 0;
+    const spentTotal = budget.totalSpent || 0;
+    const balanceTotal = budget.totalBalance || 0;
+
+    const totalBudgetedStr = formatAmountLocal(budgetedTotal);
+    const totalSpentStr = formatAmountLocal(spentTotal);
+    const totalBalanceStr = formatAmountLocal(balanceTotal);
+    const totalStatusIndicator = balanceTotal < 0 ? '🔴 Over budget' : '🟢 Within budget';
+
+    const summaryField = {
+      name: '📊 Overall Monthly Summary',
+      value: `• **Total Budgeted**: ${totalBudgetedStr}\n` +
+             `• **Total Spent**: ${totalSpentStr}\n` +
+             `• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`,
+      inline: false
+    };
+
+    const [year, month] = currentMonth.split('-');
+    const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
+    const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const embed = {
+      title: `📊 Daily Budget Report — ${monthName}`,
+      color: balanceTotal < 0 ? 15143740 : 3066993,
+      fields: [...groupFields, summaryField],
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: 'Actual Budget Notifier'
+      }
+    };
+
+    await sendDiscordReport(config.discordWebhookUrl, embed);
+
+  } finally {
+    console.log('Daily Report: Shutting down connection to Actual Server...');
     await api.shutdown();
   }
 }

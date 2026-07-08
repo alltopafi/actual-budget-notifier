@@ -10,13 +10,15 @@
   },
   "dependencies": {
     "@actual-app/api": "^26.7.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.4.5",
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",
     "nodemon": "^3.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "@types/node-cron": "^3.0.11"
   },
   "overrides": {
     "better-sqlite3": "^12.11.1"
