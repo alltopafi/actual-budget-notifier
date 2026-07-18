@@ -331,84 +331,123 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     const embeds: any[] = [];
     let currentDescription = '';
 
-    // 2. Loop through category groups and categories to build report description
+    const expenseGroups: any[] = [];
+    const incomeGroups: any[] = [];
+
+    // Separate groups into expenses and income
     if (budget.categoryGroups) {
       for (const group of budget.categoryGroups) {
-        if (group.is_income || group.hidden) {
+        if (group.hidden) {
           continue;
         }
-
-        let groupBudgeted = 0;
-        let groupSpent = 0;
-        const catLines: string[] = [];
-
-        if (Array.isArray(group.categories)) {
-          for (const cat of group.categories as any[]) {
-            if (cat.hidden || cat.is_income) {
-              continue;
-            }
-
-            const budgetedVal = cat.budgeted || 0;
-            const spentVal = cat.spent || 0;
-            const balanceVal = cat.balance || 0;
-
-            groupBudgeted += budgetedVal;
-            groupSpent += spentVal;
-
-            const budgetedStr = formatAmountReport(budgetedVal);
-            const spentStr = formatAmountReport(spentVal);
-            const balanceStr = formatAmountReport(balanceVal);
-
-            const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
-
-            let statusEmoji = '🟢';
-            if (balanceVal < 0) {
-              statusEmoji = '🔴';
-            } else if (balanceVal === 0 && budgetedVal > 0) {
-              statusEmoji = '🔵';
-            } else if (spentVal === 0 && budgetedVal === 0) {
-              statusEmoji = '⚪';
-            }
-
-            if (isProgressStyle) {
-              const catBlock: string[] = [];
-              catBlock.push(`\u2003\u2003${statusEmoji} **${cat.name}**`);
-              catBlock.push(`\u2003\u2003${renderProgressBarLocal(spentVal, budgetedVal, statusEmoji)}`);
-              
-              if (spentVal !== 0 || budgetedVal !== 0) {
-                catBlock.push(`\u2003\u2003Spent: ${spentStr} | Budgeted: ${budgetedStr}`);
-                catBlock.push(`\u2003\u2003**Remaining: ${balanceStr}**`);
-              }
-              
-              catLines.push(catBlock.join('\n'));
-            } else {
-              catLines.push(`\u2003\u2003${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
-            }
-          }
-        }
-
-        if (catLines.length > 0) {
-          const groupSpentStr = formatAmountReport(groupSpent);
-          const groupBudgetedStr = formatAmountReport(groupBudgeted);
-          const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
-
-          // Header formatted as: "### 📁 Group Name — Spent -$X.XX / Budgeted $Y.YY"
-          let groupText = `### 📁 ${group.name} — Spent ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
-          const joinSeparator = isProgressStyle ? '\n\n' : '\n';
-          groupText += catLines.join(joinSeparator) + '\n\n';
-
-          // Paginate into a new embed if it exceeds safe description limits (4096 is absolute max, we use 3800)
-          if (currentDescription.length + groupText.length > 3800) {
-            embeds.push({
-              title: embeds.length === 0 ? title : `${title} (Continued)`,
-              color,
-              description: currentDescription.trim()
-            });
-            currentDescription = '';
-          }
-          currentDescription += groupText;
+        if (group.is_income) {
+          incomeGroups.push(group);
+        } else {
+          expenseGroups.push(group);
         }
       }
+    }
+
+    const appendGroupToEmbeds = (group: any) => {
+      let groupBudgeted = 0;
+      let groupSpent = 0;
+      const categoriesToProcess: any[] = [];
+
+      if (Array.isArray(group.categories)) {
+        for (const cat of group.categories as any[]) {
+          if (cat.hidden) {
+            continue;
+          }
+          groupBudgeted += cat.budgeted || 0;
+          groupSpent += cat.spent || 0;
+          categoriesToProcess.push(cat);
+        }
+      }
+
+      if (categoriesToProcess.length === 0) {
+        return;
+      }
+
+      const groupSpentStr = formatAmountReport(groupSpent);
+      const groupBudgetedStr = formatAmountReport(groupBudgeted);
+      const label = group.is_income ? 'Received' : 'Spent';
+
+      // Header formatted as: "### 📁 Group Name — Spent/Received -$X.XX / Budgeted $Y.YY"
+      const groupHeader = `### 📁 ${group.name} — ${label} ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
+
+      if (currentDescription.length + groupHeader.length > 1800) {
+        embeds.push({
+          title: embeds.length === 0 ? title : `${title} (Continued)`,
+          color,
+          description: currentDescription.trim()
+        });
+        currentDescription = '';
+      }
+
+      currentDescription += groupHeader;
+
+      const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
+      const joinSeparator = isProgressStyle ? '\n\n' : '\n';
+
+      for (let i = 0; i < categoriesToProcess.length; i++) {
+        const cat = categoriesToProcess[i];
+        const budgetedVal = cat.budgeted || 0;
+        const spentVal = cat.spent || 0;
+        const balanceVal = cat.balance || 0;
+
+        const budgetedStr = formatAmountReport(budgetedVal);
+        const spentStr = formatAmountReport(spentVal);
+        const balanceStr = formatAmountReport(balanceVal);
+
+        let statusEmoji = '🟢';
+        if (balanceVal < 0) {
+          statusEmoji = '🔴';
+        } else if (balanceVal === 0 && budgetedVal > 0) {
+          statusEmoji = '🔵';
+        } else if (spentVal === 0 && budgetedVal === 0) {
+          statusEmoji = '⚪';
+        }
+
+        let catText = '';
+        if (isProgressStyle) {
+          const catBlock: string[] = [];
+          catBlock.push(`\u2003\u2003${statusEmoji} **${cat.name}**`);
+          catBlock.push(`\u2003\u2003${renderProgressBarLocal(spentVal, budgetedVal, statusEmoji)}`);
+          
+          if (spentVal !== 0 || budgetedVal !== 0) {
+            catBlock.push(`\u2003\u2003${label}: ${spentStr} | Budgeted: ${budgetedStr}`);
+            catBlock.push(`\u2003\u2003**Remaining: ${balanceStr}**`);
+          }
+          catText = catBlock.join('\n');
+        } else {
+          catText = `\u2003\u2003${statusEmoji} **${cat.name}**: ${label} ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`;
+        }
+
+        const prefix = currentDescription.endsWith('\n\n') || currentDescription.endsWith('\n') ? '' : joinSeparator;
+        const proposedText = prefix + catText;
+
+        if (currentDescription.length + proposedText.length > 1800) {
+          embeds.push({
+            title: embeds.length === 0 ? title : `${title} (Continued)`,
+            color,
+            description: currentDescription.trim()
+          });
+          currentDescription = `### 📁 ${group.name} (Continued)\n\n` + catText;
+        } else {
+          currentDescription += proposedText;
+        }
+      }
+
+      currentDescription += '\n\n';
+    };
+
+    // 2. Loop through category groups and categories to build report description
+    for (const group of expenseGroups) {
+      appendGroupToEmbeds(group);
+    }
+
+    for (const group of incomeGroups) {
+      appendGroupToEmbeds(group);
     }
 
     // 3. Overall monthly summary formatted
@@ -425,7 +464,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
                      `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
     }
 
-    if (currentDescription.length + summaryText.length > 3800) {
+    if (currentDescription.length + summaryText.length > 1800) {
       embeds.push({
         title: embeds.length === 0 ? title : `${title} (Continued)`,
         color,

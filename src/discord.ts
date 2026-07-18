@@ -134,26 +134,34 @@ export async function sendDiscordNotification(webhookUrl: string, transactions: 
 
 /**
  * Sends a custom embed daily report (or array of embeds) directly to the Discord webhook.
+ * Sends each embed as a separate message to prevent hitting Discord's 6000-character total limit.
  */
 export async function sendDiscordReport(webhookUrl: string, embeds: any | any[]): Promise<void> {
-  const payload = { embeds: Array.isArray(embeds) ? embeds : [embeds] };
+  const embedList = Array.isArray(embeds) ? embeds : [embeds];
 
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    });
+  for (const embed of embedList) {
+    const payload = { embeds: [embed] };
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Failed to send Discord daily report. Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
-    } else {
-      console.log('Successfully sent Daily Budget Report to Discord.');
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Failed to send Discord daily report embed. Status: ${response.status} ${response.statusText}. Response: ${errorText}`);
+      } else {
+        console.log('Successfully sent Daily Budget Report embed to Discord.');
+      }
+    } catch (error) {
+      console.error('Network error sending daily report embed to Discord:', error);
     }
-  } catch (error) {
-    console.error('Network error sending daily report to Discord:', error);
+
+    // Add a short delay between consecutive messages to prevent rate limit issues
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
 }
