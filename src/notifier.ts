@@ -14,6 +14,7 @@ export interface NotifierConfig {
   triggerBankSync: boolean;
   dailyReportCron: string;
   dailyReportTz: string;
+  dailyReportStyle: string;
 }
 
 /**
@@ -279,6 +280,38 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
       return `${sign}$${dollarVal}`;
     };
 
+    // Helper to render emoji-based progress bar
+    const renderProgressBarLocal = (spent: number, budgeted: number, statusEmoji: string): string => {
+      const budgetedVal = Math.max(0, budgeted);
+      const spentVal = Math.abs(spent);
+      
+      let percent = 0;
+      if (budgetedVal > 0) {
+        percent = Math.round((spentVal / budgetedVal) * 100);
+      } else if (spentVal > 0) {
+        percent = 100;
+      }
+      
+      let fillEmoji = '🟩'; // default green
+      if (statusEmoji === '🔴') {
+        fillEmoji = '🟥'; // red
+      } else if (statusEmoji === '🔵') {
+        fillEmoji = '🟦'; // blue
+      } else if (statusEmoji === '⚪') {
+        fillEmoji = '⬛'; // unused
+      }
+      
+      const emptyEmoji = '⬛';
+      const totalBlocks = 10;
+      
+      const visualPercent = Math.max(0, Math.min(100, percent));
+      const filledBlocks = Math.round((visualPercent / 100) * totalBlocks);
+      const emptyBlocks = totalBlocks - filledBlocks;
+      
+      const barString = fillEmoji.repeat(filledBlocks) + emptyEmoji.repeat(emptyBlocks);
+      return `${barString} **${percent}%**`;
+    };
+
     const budgetedTotal = budget.totalBudgeted || 0;
     const spentTotal = budget.totalSpent || 0;
     const balanceTotal = budget.totalBalance || 0;
@@ -326,25 +359,43 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
             const spentStr = formatAmountReport(spentVal);
             const balanceStr = formatAmountReport(balanceVal);
 
+            const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
+
             let statusEmoji = '🟢';
             if (balanceVal < 0) {
               statusEmoji = '🔴';
+            } else if (balanceVal === 0 && budgetedVal > 0) {
+              statusEmoji = '🔵';
             } else if (spentVal === 0 && budgetedVal === 0) {
               statusEmoji = '⚪';
             }
 
-            // Use Em Spaces for clean indentation
-            catLines.push(`\u2003\u2003${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
+            if (isProgressStyle) {
+              const catBlock: string[] = [];
+              catBlock.push(`\u2003\u2003${statusEmoji} **${cat.name}**`);
+              catBlock.push(`\u2003\u2003${renderProgressBarLocal(spentVal, budgetedVal, statusEmoji)}`);
+              
+              if (spentVal !== 0 || budgetedVal !== 0) {
+                catBlock.push(`\u2003\u2003Spent: ${spentStr} | Budgeted: ${budgetedStr}`);
+                catBlock.push(`\u2003\u2003**Remaining: ${balanceStr}**`);
+              }
+              
+              catLines.push(catBlock.join('\n'));
+            } else {
+              catLines.push(`\u2003\u2003${statusEmoji} **${cat.name}**: Spent ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`);
+            }
           }
         }
 
         if (catLines.length > 0) {
           const groupSpentStr = formatAmountReport(groupSpent);
           const groupBudgetedStr = formatAmountReport(groupBudgeted);
+          const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
 
           // Header formatted as: "### 📁 Group Name — Spent -$X.XX / Budgeted $Y.YY"
           let groupText = `### 📁 ${group.name} — Spent ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
-          groupText += catLines.join('\n') + '\n\n';
+          const joinSeparator = isProgressStyle ? '\n\n' : '\n';
+          groupText += catLines.join(joinSeparator) + '\n\n';
 
           // Paginate into a new embed if it exceeds safe description limits (4096 is absolute max, we use 3800)
           if (currentDescription.length + groupText.length > 3800) {
@@ -361,10 +412,18 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     }
 
     // 3. Overall monthly summary formatted
-    const summaryText = `### 📊 Overall Monthly Summary\n` +
-                        `\u2003\u2003• **Total Budgeted**: ${totalBudgetedStr}\n` +
-                        `\u2003\u2003• **Total Spent**: ${totalSpentStr}\n` +
-                        `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
+    const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
+    let summaryText = `### 📊 Overall Monthly Summary\n`;
+    if (isProgressStyle) {
+      const summaryBar = renderProgressBarLocal(spentTotal, budgetedTotal, balanceTotal < 0 ? '🔴' : '🟢');
+      summaryText += `\u2003\u2003${summaryBar}\n` +
+                     `\u2003\u2003Spent: ${totalSpentStr} | Budgeted: ${totalBudgetedStr}\n` +
+                     `\u2003\u2003**Remaining: ${totalBalanceStr}** (${totalStatusIndicator})`;
+    } else {
+      summaryText += `\u2003\u2003• **Total Budgeted**: ${totalBudgetedStr}\n` +
+                     `\u2003\u2003• **Total Spent**: ${totalSpentStr}\n` +
+                     `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
+    }
 
     if (currentDescription.length + summaryText.length > 3800) {
       embeds.push({

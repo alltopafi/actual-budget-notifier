@@ -111,7 +111,8 @@ async function main() {
     stateFilePath: path.resolve(stateFilePath),
     triggerBankSync,
     dailyReportCron: getOptionalEnv('DAILY_REPORT_CRON', '0 20 * * *'),
-    dailyReportTz: getOptionalEnv('DAILY_REPORT_TZ', 'America/Chicago')
+    dailyReportTz: getOptionalEnv('DAILY_REPORT_TZ', 'America/Chicago'),
+    dailyReportStyle: getOptionalEnv('DAILY_REPORT_STYLE', 'standard')
   };
 
   console.log('--- Configuration ---');
@@ -122,6 +123,7 @@ async function main() {
   console.log(`Interval:           ${scanIntervalMinutes} minute(s)`);
   console.log(`Trigger Bank Sync:  ${config.triggerBankSync}`);
   console.log(`Daily Report Cron:  ${config.dailyReportCron} (${config.dailyReportTz})`);
+  console.log(`Daily Report Style: ${config.dailyReportStyle}`);
   console.log(`Data Directory:     ${config.actualDataDir}`);
   console.log(`State File Path:    ${config.stateFilePath}`);
   console.log('---------------------');
