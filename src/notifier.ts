@@ -35,11 +35,15 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
       password: config.actualEncryptionPassword
     });
 
+    console.log('Syncing budget with server...');
+    await api.sync();
+
     if (config.triggerBankSync) {
       console.log('Triggering bank synchronization...');
       try {
         await api.runBankSync();
-        console.log('Bank sync completed.');
+        console.log('Bank sync completed. Syncing changes to server...');
+        await api.sync();
       } catch (bankSyncError) {
         console.error('Error during bank synchronization:', bankSyncError);
         // We continue checking for transactions even if bank sync fails,
@@ -258,6 +262,9 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     await api.downloadBudget(config.actualBudgetSyncId, {
       password: config.actualEncryptionPassword
     });
+
+    console.log('Daily Report: Syncing budget with server...');
+    await api.sync();
 
     // 1. Get current month in the configured timezone (America/Chicago by default)
     const formatter = new Intl.DateTimeFormat('en-US', {
