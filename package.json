@@ -1,6 +1,6 @@
 {
   "name": "actual-budget-notifier",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Periodically scans Actual Budget for new transactions and sends notifications to Discord webhooks.",
   "main": "dist/index.js",
   "scripts": {

@@ -332,11 +332,8 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     const date = new Date(parseInt(year, 10), parseInt(month, 10) - 1, 1);
     const monthName = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 
-    const title = `📊 Daily Budget Report — ${monthName}`;
     const color = balanceTotal < 0 ? 15143740 : 3066993;
-
     const embeds: any[] = [];
-    let currentDescription = '';
 
     const expenseGroups: any[] = [];
     const incomeGroups: any[] = [];
@@ -355,7 +352,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
       }
     }
 
-    const appendGroupToEmbeds = (group: any) => {
+    const buildGroupEmbed = (group: any) => {
       let groupBudgeted = 0;
       let groupSpent = 0;
       const categoriesToProcess: any[] = [];
@@ -381,17 +378,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
 
       // Header formatted as: "### 📁 Group Name — Spent/Received -$X.XX / Budgeted $Y.YY"
       const groupHeader = `### 📁 ${group.name} — ${label} ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
-
-      if (currentDescription.length + groupHeader.length > 1800) {
-        embeds.push({
-          title: embeds.length === 0 ? title : `${title} (Continued)`,
-          color,
-          description: currentDescription.trim()
-        });
-        currentDescription = '';
-      }
-
-      currentDescription += groupHeader;
+      let embedDescription = '';
 
       const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
       const joinSeparator = isProgressStyle ? '\n\n' : '\n';
@@ -430,34 +417,40 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
           catText = `\u2003\u2003${statusEmoji} **${cat.name}**: ${label} ${spentStr} / Budgeted ${budgetedStr} (Balance: ${balanceStr})`;
         }
 
-        const prefix = currentDescription.endsWith('\n\n') || currentDescription.endsWith('\n') ? '' : joinSeparator;
+        const prefix = embedDescription.endsWith('\n\n') || embedDescription.endsWith('\n') ? '' : joinSeparator;
         const proposedText = prefix + catText;
 
-        if (currentDescription.length + proposedText.length > 1800) {
+        if (embedDescription.length + proposedText.length > 1800) {
+          const groupColor = group.is_income ? 3066993 : ((groupBudgeted + groupSpent) < 0 ? 15143740 : 3066993);
           embeds.push({
-            title: embeds.length === 0 ? title : `${title} (Continued)`,
-            color,
-            description: currentDescription.trim()
+            title: `📁 ${group.name} — ${monthName}`,
+            color: groupColor,
+            description: (groupHeader + embedDescription).trim()
           });
-          currentDescription = `### 📁 ${group.name} (Continued)\n\n` + catText;
+          embedDescription = catText;
         } else {
-          currentDescription += proposedText;
+          embedDescription += proposedText;
         }
       }
 
-      currentDescription += '\n\n';
+      const finalGroupColor = group.is_income ? 3066993 : ((groupBudgeted + groupSpent) < 0 ? 15143740 : 3066993);
+      embeds.push({
+        title: `📁 ${group.name} — ${monthName}`,
+        color: finalGroupColor,
+        description: (groupHeader + embedDescription).trim()
+      });
     };
 
-    // 2. Loop through category groups and categories to build report description
+    // 2. Loop through category groups and build report embeds
     for (const group of expenseGroups) {
-      appendGroupToEmbeds(group);
+      buildGroupEmbed(group);
     }
 
     for (const group of incomeGroups) {
-      appendGroupToEmbeds(group);
+      buildGroupEmbed(group);
     }
 
-    // 3. Overall monthly summary formatted
+    // 3. Overall monthly summary formatted as a standalone embed
     const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
     let summaryText = `### 📊 Overall Monthly Summary\n`;
     if (isProgressStyle) {
@@ -471,33 +464,15 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
                      `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
     }
 
-    if (currentDescription.length + summaryText.length > 1800) {
-      embeds.push({
-        title: embeds.length === 0 ? title : `${title} (Continued)`,
-        color,
-        description: currentDescription.trim()
-      });
-      embeds.push({
-        title: `${title} — Summary`,
-        color,
-        description: summaryText,
-        timestamp: new Date().toISOString(),
-        footer: {
-          text: 'Actual Budget Notifier'
-        }
-      });
-    } else {
-      currentDescription += '\n' + summaryText;
-      embeds.push({
-        title: embeds.length === 0 ? title : `${title} (Continued)`,
-        color,
-        description: currentDescription.trim(),
-        timestamp: new Date().toISOString(),
-        footer: {
-          text: 'Actual Budget Notifier'
-        }
-      });
-    }
+    embeds.push({
+      title: `📊 Daily Budget Report — Summary`,
+      color,
+      description: summaryText,
+      timestamp: new Date().toISOString(),
+      footer: {
+        text: 'Actual Budget Notifier'
+      }
+    });
 
     await sendDiscordReport(config.discordWebhookUrl, embeds);
 
