@@ -1,6 +1,6 @@
 {
   "name": "actual-budget-notifier",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Periodically scans Actual Budget for new transactions and sends notifications to Discord webhooks.",
   "main": "dist/index.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts"
   },
   "dependencies": {
-    "@actual-app/api": "^26.7.0",
+    "@actual-app/api": "^26.9.0",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3"
   },
