@@ -51,6 +51,9 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
       }
     }
 
+    // Ensure all budget months and spreadsheet calculations are fully settled
+    await api.getBudgetMonths();
+
     // Fetch reference data to resolve names
     console.log('Fetching accounts, payees, and categories...');
     const [accounts, payees, categories] = await Promise.all([
@@ -157,7 +160,7 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
       // Helper to format amount
       const formatAmountLocal = (amount: number) => {
         const dollarVal = Math.abs(amount / 100).toFixed(2);
-        const sign = amount < 0 ? '-' : amount > 0 ? '+' : '';
+        const sign = amount < 0 ? '-' : '';
         return `${sign}$${dollarVal}`;
       };
 
@@ -171,7 +174,7 @@ export async function checkNewTransactions(config: NotifierConfig, state: State)
             const catBudget = getCategoryFromBudget(txMonth, tx.category);
             if (catBudget && !catBudget.is_income) {
               const budgetedVal = catBudget.budgeted || 0;
-              const spentVal = catBudget.spent || 0;
+              const spentVal = Math.abs(catBudget.spent || 0);
               const balanceVal = catBudget.balance || 0;
 
               const budgetedStr = formatAmountLocal(budgetedVal);
@@ -266,6 +269,20 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     console.log('Daily Report: Syncing budget with server...');
     await api.sync();
 
+    if (config.triggerBankSync) {
+      console.log('Daily Report: Triggering bank synchronization...');
+      try {
+        await api.runBankSync();
+        console.log('Daily Report: Bank sync completed. Syncing changes to server...');
+        await api.sync();
+      } catch (bankSyncError) {
+        console.error('Daily Report: Error during bank synchronization:', bankSyncError);
+      }
+    }
+
+    // Ensure all budget months and spreadsheet calculations are fully settled
+    await api.getBudgetMonths();
+
     // 1. Get current month in the configured timezone (America/Chicago by default)
     const formatter = new Intl.DateTimeFormat('en-US', {
       timeZone: config.dailyReportTz,
@@ -280,11 +297,17 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     console.log(`Daily Report: Fetching budget status for ${currentMonth}...`);
     const budget = await api.getBudgetMonth(currentMonth);
 
-    // Helper to format amount (no "+" sign on positive numbers, only "-" for negative)
+    // Helper to format monetary amount (e.g., 5000 -> "$50.00", -2000 -> "-$20.00")
     const formatAmountReport = (amount: number) => {
       const dollarVal = Math.abs(amount / 100).toFixed(2);
       const sign = amount < 0 ? '-' : '';
       return `${sign}$${dollarVal}`;
+    };
+
+    // Helper to format positive absolute amount for display alongside labels like "Spent: " or "Received: "
+    const formatPositiveAmount = (amount: number) => {
+      const dollarVal = (Math.abs(amount) / 100).toFixed(2);
+      return `$${dollarVal}`;
     };
 
     // Helper to render emoji-based progress bar
@@ -320,11 +343,12 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     };
 
     const budgetedTotal = budget.totalBudgeted || 0;
-    const spentTotal = budget.totalSpent || 0;
+    const spentTotal = Math.abs(budget.totalSpent || 0);
     const balanceTotal = budget.totalBalance || 0;
+    const toBudgetTotal = budget.toBudget;
 
     const totalBudgetedStr = formatAmountReport(budgetedTotal);
-    const totalSpentStr = formatAmountReport(spentTotal);
+    const totalSpentStr = formatPositiveAmount(spentTotal);
     const totalBalanceStr = formatAmountReport(balanceTotal);
     const totalStatusIndicator = balanceTotal < 0 ? '🔴 Over budget' : '🟢 Within budget';
 
@@ -355,6 +379,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
     const buildGroupEmbed = (group: any) => {
       let groupBudgeted = 0;
       let groupSpent = 0;
+      let groupBalance = 0;
       const categoriesToProcess: any[] = [];
 
       if (Array.isArray(group.categories)) {
@@ -363,7 +388,8 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
             continue;
           }
           groupBudgeted += cat.budgeted || 0;
-          groupSpent += cat.spent || 0;
+          groupSpent += Math.abs(cat.spent || cat.received || 0);
+          groupBalance += cat.balance || 0;
           categoriesToProcess.push(cat);
         }
       }
@@ -372,12 +398,15 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
         return;
       }
 
-      const groupSpentStr = formatAmountReport(groupSpent);
+      const groupSpentStr = formatPositiveAmount(groupSpent);
       const groupBudgetedStr = formatAmountReport(groupBudgeted);
+      const groupBalanceStr = formatAmountReport(groupBalance);
       const label = group.is_income ? 'Received' : 'Spent';
 
-      // Header formatted as: "### 📁 Group Name — Spent/Received -$X.XX / Budgeted $Y.YY"
-      const groupHeader = `### 📁 ${group.name} — ${label} ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`;
+      // Header formatted with Spent/Received, Budgeted, and Balance
+      const groupHeader = group.is_income
+        ? `### 📁 ${group.name} — Received ${groupSpentStr} / Budgeted ${groupBudgetedStr}\n`
+        : `### 📁 ${group.name} — Spent ${groupSpentStr} / Budgeted ${groupBudgetedStr} (Balance: ${groupBalanceStr})\n`;
       let embedDescription = '';
 
       const isProgressStyle = config.dailyReportStyle.toLowerCase() === 'progress';
@@ -386,11 +415,11 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
       for (let i = 0; i < categoriesToProcess.length; i++) {
         const cat = categoriesToProcess[i];
         const budgetedVal = cat.budgeted || 0;
-        const spentVal = cat.spent || 0;
+        const spentVal = Math.abs(cat.spent || cat.received || 0);
         const balanceVal = cat.balance || 0;
 
         const budgetedStr = formatAmountReport(budgetedVal);
-        const spentStr = formatAmountReport(spentVal);
+        const spentStr = formatPositiveAmount(spentVal);
         const balanceStr = formatAmountReport(balanceVal);
 
         let statusEmoji = '🟢';
@@ -421,7 +450,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
         const proposedText = prefix + catText;
 
         if (embedDescription.length + proposedText.length > 1800) {
-          const groupColor = group.is_income ? 3066993 : ((groupBudgeted + groupSpent) < 0 ? 15143740 : 3066993);
+          const groupColor = group.is_income ? 3066993 : (groupBalance < 0 ? 15143740 : 3066993);
           embeds.push({
             title: `📁 ${group.name} — ${monthName}`,
             color: groupColor,
@@ -433,7 +462,7 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
         }
       }
 
-      const finalGroupColor = group.is_income ? 3066993 : ((groupBudgeted + groupSpent) < 0 ? 15143740 : 3066993);
+      const finalGroupColor = group.is_income ? 3066993 : (groupBalance < 0 ? 15143740 : 3066993);
       embeds.push({
         title: `📁 ${group.name} — ${monthName}`,
         color: finalGroupColor,
@@ -457,11 +486,19 @@ export async function sendDailyReport(config: NotifierConfig): Promise<void> {
       const summaryBar = renderProgressBarLocal(spentTotal, budgetedTotal, balanceTotal < 0 ? '🔴' : '🟢');
       summaryText += `\u2003\u2003${summaryBar}\n` +
                      `\u2003\u2003Spent: ${totalSpentStr} | Budgeted: ${totalBudgetedStr}\n` +
-                     `\u2003\u2003**Remaining: ${totalBalanceStr}** (${totalStatusIndicator})`;
+                     `\u2003\u2003**Category Balance: ${totalBalanceStr}** (${totalStatusIndicator})`;
+      if (toBudgetTotal !== undefined && toBudgetTotal !== null) {
+        const toBudgetStr = formatAmountReport(toBudgetTotal);
+        summaryText += `\n\u2003\u2003**To Budget: ${toBudgetStr}**`;
+      }
     } else {
       summaryText += `\u2003\u2003• **Total Budgeted**: ${totalBudgetedStr}\n` +
                      `\u2003\u2003• **Total Spent**: ${totalSpentStr}\n` +
                      `\u2003\u2003• **Total Balance**: **${totalBalanceStr}** (${totalStatusIndicator})`;
+      if (toBudgetTotal !== undefined && toBudgetTotal !== null) {
+        const toBudgetStr = formatAmountReport(toBudgetTotal);
+        summaryText += `\n\u2003\u2003• **To Budget**: **${toBudgetStr}**`;
+      }
     }
 
     embeds.push({
