@@ -152,6 +152,11 @@ async function main() {
     dailyReportStyle: getOptionalEnv('DAILY_REPORT_STYLE', 'standard')
   };
 
+  const apiKey = process.env.API_KEY?.trim() || undefined;
+  if (!apiKey) {
+    console.warn('WARNING: API_KEY is not set. POST /scan and POST /report are unauthenticated.');
+  }
+
   console.log('--- Configuration ---');
   console.log(`Server URL:         ${config.actualServerUrl}`);
   console.log(`Sync ID:            ${config.actualBudgetSyncId}`);
@@ -177,11 +182,6 @@ async function main() {
   if (isNaN(port) || port <= 0) {
     console.error(`Invalid PORT: ${portStr}. Must be a positive integer.`);
     process.exit(1);
-  }
-
-  const apiKey = process.env.API_KEY?.trim() || undefined;
-  if (!apiKey) {
-    console.warn('WARNING: API_KEY is not set. POST /scan and POST /report are unauthenticated.');
   }
 
   // Scanner lock to prevent concurrent database opens (which locks sqlite)
