@@ -1,6 +1,7 @@
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as http from 'http';
+import * as crypto from 'crypto';
 import * as cron from 'node-cron';
 import { loadState } from './state';
 import { checkNewTransactions, NotifierConfig, sendDailyReport } from './notifier';
@@ -22,10 +23,46 @@ console.info = (...args) => originalInfo(getTimestamp(), ...args);
 dotenv.config();
 
 /**
+ * Timing-safe comparison to prevent timing side-channel attacks.
+ */
+function safeCompare(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Validates the API key sent via 'Authorization: Bearer <key>' or 'X-API-Key: <key>'.
+ */
+function isAuthorized(req: http.IncomingMessage, apiKey: string): boolean {
+  const authHeader = req.headers['authorization'];
+  const apiKeyHeader = req.headers['x-api-key'];
+  let token = '';
+
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    token = authHeader.substring(7);
+  } else if (apiKeyHeader) {
+    token = String(apiKeyHeader);
+  }
+
+  return !!token && safeCompare(token, apiKey);
+}
+
+/**
  * Starts a lightweight HTTP server to listen for push hook triggers.
  */
-function startHttpServer(port: number, triggerScan: () => Promise<void>, triggerReport: () => Promise<void>) {
+function startHttpServer(port: number, apiKey: string | undefined, triggerScan: () => Promise<void>, triggerReport: () => Promise<void>) {
   const server = http.createServer((req, res) => {
+    if (req.method === 'POST' && (req.url === '/scan' || req.url === '/report') && apiKey && !isAuthorized(req, apiKey)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized: Invalid or missing API key' }));
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/scan') {
       console.log('Received HTTP trigger on POST /scan. Launching database check...');
       
@@ -124,6 +161,7 @@ async function main() {
   console.log(`Trigger Bank Sync:  ${config.triggerBankSync}`);
   console.log(`Daily Report Cron:  ${config.dailyReportCron} (${config.dailyReportTz})`);
   console.log(`Daily Report Style: ${config.dailyReportStyle}`);
+  console.log(`API Key Required:   ${apiKey ? 'Yes' : 'No'}`);
   console.log(`Data Directory:     ${config.actualDataDir}`);
   console.log(`State File Path:    ${config.stateFilePath}`);
   console.log('---------------------');
@@ -139,6 +177,11 @@ async function main() {
   if (isNaN(port) || port <= 0) {
     console.error(`Invalid PORT: ${portStr}. Must be a positive integer.`);
     process.exit(1);
+  }
+
+  const apiKey = process.env.API_KEY?.trim() || undefined;
+  if (!apiKey) {
+    console.warn('WARNING: API_KEY is not set. POST /scan and POST /report are unauthenticated.');
   }
 
   // Scanner lock to prevent concurrent database opens (which locks sqlite)
@@ -168,7 +211,7 @@ async function main() {
   };
 
   // Start the HTTP hook server
-  startHttpServer(port, triggerScan, triggerReport);
+  startHttpServer(port, apiKey, triggerScan, triggerReport);
 
   // Helper to run daily report with locking
   const runDailyReportSafe = async () => {

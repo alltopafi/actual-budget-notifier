@@ -33,6 +33,7 @@ Create a `.env` file in the root directory (see `.env.example`). The service exp
 - `TRIGGER_BANK_SYNC`: Set to `true` to trigger Actual's bank sync before scanning. Defaults to `false`.
 - `ACTUAL_DATA_DIR`: Directory where Actual Budget will store its sqlite cache. Defaults to `data/actual-data`.
 - `STATE_FILE_PATH`: Path to the JSON state file. Defaults to `data/state.json`.
+- `API_KEY`: *(Optional, secret)* If set, `POST /scan` and `POST /report` require this key via `Authorization: Bearer <key>` or `X-API-Key: <key>` (same scheme as `actual-budget-input`). If unset, the endpoints are unauthenticated.
 
 ---
 
@@ -57,7 +58,7 @@ Exposed Endpoints:
 You can trigger these endpoints by making `POST` requests to the service:
 
 ```bash
-# Trigger transaction scan
+# Trigger transaction scan (add -H "X-API-Key: $API_KEY" when API_KEY is set)
 curl -X POST http://localhost:3000/scan
 
 # Trigger daily budget report (for manual testing)
